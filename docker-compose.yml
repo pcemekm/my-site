@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  my-site:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pcemek/my-site:latest
+    container_name: my-site
+    restart: unless-stopped
+    ports:
+      - "3010:80"
+    networks:
+      - mysite-net
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: my-site-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - DOCKER_API_VERSION=1.44
+    command: my-site --interval 30 --cleanup
+    networks:
+      - mysite-net
+
+networks:
+  mysite-net:
+    driver: bridge
