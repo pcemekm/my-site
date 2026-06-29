@@ -2,105 +2,64 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = 'my-site'
-        IMAGE_TAG = 'latest'
-        PROJECT_DIR = '/home/tils/Desktop/my-site'
+        REGISTRY       = '192.168.0.168:5000'
+        IMAGE_NAME     = 'my-site'
+        IMAGE_TAG      = 'latest'
+        REPO_DIR       = '/home/tils/Desktop/github/my-site'
+        DEPLOY_DIR     = '/home/tils/Desktop/my-site'
     }
 
     stages {
         stage('Checkout') {
             steps {
-                echo 'Pulling latest changes from repository...'
-                dir("${PROJECT_DIR}") {
+                dir("${REPO_DIR}") {
                     sh 'git pull origin main || git pull origin master'
                 }
             }
         }
 
-        stage('Install Dependencies') {
+        stage('Build Docker Image') {
             steps {
-                echo 'Installing Node.js dependencies...'
-                dir("${PROJECT_DIR}") {
-                    sh 'npm ci'
+                dir("${REPO_DIR}") {
+                    sh "docker build -t ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ."
                 }
             }
         }
 
-        stage('Lint') {
+        stage('Push to Registry') {
             steps {
-                echo 'Running linter...'
-                dir("${PROJECT_DIR}") {
-                    sh 'npm run lint'
-                }
-            }
-        }
-
-        stage('Build') {
-            steps {
-                echo 'Building application...'
-                dir("${PROJECT_DIR}") {
-                    sh 'npm run build'
-                }
-            }
-        }
-
-        stage('Docker Build') {
-            steps {
-                echo 'Building Docker image...'
-                dir("${PROJECT_DIR}") {
-                    sh """
-                        docker build -t pcemek/${IMAGE_NAME}:${IMAGE_TAG} .
-                    """
-                }
+                sh "docker push ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
             }
         }
 
         stage('Deploy') {
             steps {
-                echo 'Deploying with Docker Compose from main Tils directory...'
-                dir('/home/tils/Desktop/Tils') {
-                    sh """
-                        docker-compose up -d --no-deps my-site
-                    """
+                dir("${DEPLOY_DIR}") {
+                    sh "docker compose pull"
+                    sh "docker compose up -d --force-recreate"
                 }
             }
         }
 
         stage('Health Check') {
             steps {
-                echo 'Waiting for application to be healthy...'
                 script {
-                    def maxRetries = 10
-                    def retryCount = 0
-                    def healthy = false
-
-                    while (retryCount < maxRetries && !healthy) {
+                    def retries = 12
+                    def ok = false
+                    for (int i = 0; i < retries && !ok; i++) {
                         sleep 5
-                        def result = sh(
-                            script: 'docker inspect --format="{{.State.Health.Status}}" my-site',
-                            returnStatus: true
-                        )
-                        if (result == 0) {
-                            def status = sh(
-                                script: 'docker inspect --format="{{.State.Health.Status}}" my-site',
-                                returnStdout: true
-                            ).trim()
-
-                            if (status == 'healthy') {
-                                healthy = true
-                                echo 'Application is healthy!'
-                            } else {
-                                echo "Health status: ${status}, retrying..."
-                                retryCount++
-                            }
+                        def status = sh(
+                            script: 'docker inspect --format="{{.State.Health.Status}}" my-site 2>/dev/null || echo unknown',
+                            returnStdout: true
+                        ).trim()
+                        if (status == 'healthy') {
+                            ok = true
+                            echo "Aplikacja healthy!"
                         } else {
-                            retryCount++
+                            echo "Status: ${status} (${i+1}/${retries})"
                         }
                     }
-
-                    if (!healthy) {
-                        error('Application failed health check')
-                    }
+                    if (!ok) error('Health check nie powiódł się')
                 }
             }
         }
@@ -108,16 +67,14 @@ pipeline {
 
     post {
         success {
-            echo 'Pipeline completed successfully! Application deployed at http://pcemek.local'
+            echo "Deploy zakończony. Aplikacja: http://192.168.0.168:3010"
         }
         failure {
-            echo 'Pipeline failed! Check logs for details.'
-            dir("${PROJECT_DIR}") {
-                sh 'docker-compose logs my-site'
+            dir("${DEPLOY_DIR}") {
+                sh 'docker compose logs --tail=50 my-site'
             }
         }
         always {
-            echo 'Cleaning up...'
             sh 'docker image prune -f'
         }
     }
