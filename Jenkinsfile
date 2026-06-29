@@ -2,33 +2,35 @@ pipeline {
     agent any
 
     environment {
-        REGISTRY       = '192.168.0.168:5000'
-        IMAGE_NAME     = 'my-site'
-        IMAGE_TAG      = 'latest'
-        REPO_DIR       = '/home/tils/Desktop/github/my-site'
-        DEPLOY_DIR     = '/home/tils/Desktop/my-site'
+        REGISTRY   = '192.168.0.168:5000'
+        IMAGE_NAME = 'my-site'
+        DEPLOY_DIR = '/home/tils/Desktop/my-site'
     }
 
     stages {
         stage('Checkout') {
             steps {
-                dir("${REPO_DIR}") {
-                    sh 'git pull origin main || git pull origin master'
+                checkout scm
+                script {
+                    env.VERSION = sh(
+                        script: "grep '\"version\"' package.json | head -1 | sed 's/.*\"version\": *\"//;s/\".*//'",
+                        returnStdout: true
+                    ).trim()
                 }
+                echo "Wersja: ${env.VERSION}"
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                dir("${REPO_DIR}") {
-                    sh "docker build -t ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ."
-                }
+                sh "docker build -t ${REGISTRY}/${IMAGE_NAME}:${VERSION} -t ${REGISTRY}/${IMAGE_NAME}:latest ."
             }
         }
 
         stage('Push to Registry') {
             steps {
-                sh "docker push ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+                sh "docker push ${REGISTRY}/${IMAGE_NAME}:${VERSION}"
+                sh "docker push ${REGISTRY}/${IMAGE_NAME}:latest"
             }
         }
 
@@ -44,9 +46,8 @@ pipeline {
         stage('Health Check') {
             steps {
                 script {
-                    def retries = 12
                     def ok = false
-                    for (int i = 0; i < retries && !ok; i++) {
+                    for (int i = 0; i < 12 && !ok; i++) {
                         sleep 5
                         def status = sh(
                             script: 'docker inspect --format="{{.State.Health.Status}}" my-site 2>/dev/null || echo unknown',
@@ -54,9 +55,9 @@ pipeline {
                         ).trim()
                         if (status == 'healthy') {
                             ok = true
-                            echo "Aplikacja healthy!"
+                            echo "Healthy! Wersja ${VERSION} działa."
                         } else {
-                            echo "Status: ${status} (${i+1}/${retries})"
+                            echo "Status: ${status} (${i+1}/12)"
                         }
                     }
                     if (!ok) error('Health check nie powiódł się')
@@ -67,7 +68,7 @@ pipeline {
 
     post {
         success {
-            echo "Deploy zakończony. Aplikacja: http://192.168.0.168:3010"
+            echo "Deploy v${VERSION} zakończony. http://pcemek.local"
         }
         failure {
             dir("${DEPLOY_DIR}") {
