@@ -46,21 +46,21 @@ pipeline {
         stage('Health Check') {
             steps {
                 script {
+                    sleep 20
                     def ok = false
-                    for (int i = 0; i < 12 && !ok; i++) {
+                    for (int i = 0; i < 18 && !ok; i++) {
                         sleep 5
                         def status = sh(
                             script: 'docker inspect --format="{{.State.Health.Status}}" my-site 2>/dev/null || echo unknown',
                             returnStdout: true
                         ).trim()
+                        echo "Status: ${status} (${i+1}/18)"
                         if (status == 'healthy') {
                             ok = true
-                            echo "Healthy! Wersja ${VERSION} działa."
-                        } else {
-                            echo "Status: ${status} (${i+1}/12)"
+                            echo "Healthy! Wersja ${VERSION} działa na http://pcemek.local"
                         }
                     }
-                    if (!ok) error('Health check nie powiódł się')
+                    if (!ok) error('Health check nie powiódł się po 110s')
                 }
             }
         }
